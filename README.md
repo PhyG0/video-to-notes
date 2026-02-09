@@ -56,6 +56,18 @@ python main.py input_video.mp4 --ai --ai-model llama3
 -   `--ai`: Enables AI note generation.
 -   `--ai-model`: Specifies the Ollama model to use (default: `llama3`, can use `mistral`, etc.).
 
+### Web UI 🖥️
+A browser-based interface is available for a more user-friendly experience.
+
+```bash
+python ui.py
+```
+
+This will launch a local web server at `http://127.0.0.1:7860`. You can:
+-   Drag & drop video files.
+-   Select Whisper and AI models.
+-   View and download transcripts and notes directly.
+
 ## Troubleshooting
 
 -   **"FFmpeg not found":** The tool includes a local `bin` folder. Ensure you are running the script from the root of the project directory so it can find the local binaries.
