@@ -24,7 +24,7 @@ transcription_state = {
 
 
 def get_ollama_models():
-    """Fetch available models from Ollama."""
+    """Fetch available models from Ollama with parameter sizes."""
     try:
         import ollama
         response = ollama.list()
@@ -38,6 +38,7 @@ def get_ollama_models():
         
         model_names = []
         for m in models:
+            # Get model name
             if hasattr(m, 'model'):
                 name = m.model.split(':')[0]
             elif isinstance(m, dict) and 'name' in m:
@@ -46,7 +47,26 @@ def get_ollama_models():
                 name = m['model'].split(':')[0]
             else:
                 continue
-            model_names.append(name)
+            
+            # Get size in bytes and convert to readable format
+            size_bytes = None
+            if hasattr(m, 'size'):
+                size_bytes = m.size
+            elif isinstance(m, dict) and 'size' in m:
+                size_bytes = m['size']
+            
+            if size_bytes:
+                # Convert to GB and estimate parameters (rough: 2 bytes per param for fp16)
+                size_gb = size_bytes / (1024**3)
+                params_b = size_bytes / (2 * 1024**3)  # Rough estimate
+                if params_b >= 1:
+                    label = f"{name} ({params_b:.1f}B params, {size_gb:.1f}GB)"
+                else:
+                    label = f"{name} ({size_gb:.1f}GB)"
+            else:
+                label = name
+            
+            model_names.append(label)
         
         return model_names if model_names else ["No models installed"]
     except Exception as e:
@@ -126,9 +146,12 @@ def transcribe_video(video_file, whisper_model, device, progress=gr.Progress()):
     return log_output, transcript_text, transcript_download, status
 
 
-def generate_ai_notes(ai_model, progress=gr.Progress()):
+def generate_ai_notes(ai_model_label, progress=gr.Progress()):
     """Generate AI notes from transcription."""
     global transcription_state
+    
+    # Extract clean model name from label (e.g., "llama3 (8B params, 4.7GB)" -> "llama3")
+    ai_model = ai_model_label.split(' (')[0] if ' (' in ai_model_label else ai_model_label
     
     if transcription_state["segments"] is None:
         return "❌ No transcript available. Please transcribe a video first.", "", None, ""
@@ -138,6 +161,7 @@ def generate_ai_notes(ai_model, progress=gr.Progress()):
     
     output_dir = os.path.dirname(transcript_path)
     base_name = os.path.splitext(os.path.basename(transcript_path))[0]
+
     notes_path = os.path.join(output_dir, f"{base_name}_notes.md")
     
     logs = []
