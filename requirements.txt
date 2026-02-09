@@ -1,0 +1,8 @@
+
+accelerate==0.27.0
+ctranslate2==3.24.0
+faster-whisper==1.0.1
+ffmpeg-python==0.2.0
+numpy==1.26.4
+tqdm==4.66.2
+typing_extensions==4.10.0
