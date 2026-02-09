@@ -14,6 +14,8 @@ def main():
     parser.add_argument("--model", "-m", default="medium", help="Whisper model size (default: medium).")
     parser.add_argument("--format", "-f", choices=["markdown", "json"], default="markdown", help="Output format (default: markdown).")
     parser.add_argument("--keep-audio", action="store_true", help="Keep the extracted audio file after transcription.")
+    parser.add_argument("--ai", action="store_true", help="Generate detailed AI notes using Ollama.")
+    parser.add_argument("--ai-model", default="llama3", help="Ollama model to use (default: llama3).")
     
     args = parser.parse_args()
     
@@ -48,10 +50,34 @@ def main():
         
         # Step 3: Save Output
         print(f"Saving transcript to '{output_path}'...")
-        save_transcript(segments, output_path, format=args.format)
+        # Collect segments for AI processing
+        all_segments = list(segments)
+        save_transcript(all_segments, output_path, format=args.format)
         
         print(f"Done! Transcript saved to '{output_path}'.")
-        
+
+        # Step 4: AI Note Generation (Optional)
+        if args.ai:
+            from src.ai import generate_tutorial_notes, check_ollama_server
+            
+            print("Checking Ollama availability...")
+            if not check_ollama_server():
+                print("Error: Ollama server is not reachable. Is 'ollama serve' running?")
+                print("Skipping AI note generation.")
+            else:
+                full_text = "\n".join([f"[{s['start']}-{s['end']}] {s['text']}" for s in all_segments])
+                
+                ai_output_path = args.output.replace(".md", "_notes.md") if args.output else f"{base_name}_notes.md"
+                print(f"Generating AI notes using model '{args.ai_model}'...")
+                print("This may take a while depending on the video length...")
+                
+                notes = generate_tutorial_notes(full_text, model=args.ai_model)
+                
+                with open(ai_output_path, "w", encoding="utf-8") as f:
+                    f.write(notes)
+                
+                print(f"AI Notes saved to '{ai_output_path}'")
+
     except Exception as e:
         print(f"An error occurred: {e}")
         import traceback
