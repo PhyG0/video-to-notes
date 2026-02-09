@@ -16,18 +16,36 @@ from src.audio import extract_audio, cleanup_audio
 from src.transcriber import transcribe_audio
 from src.formatter import save_transcript
 
-# Global state to store transcription results for AI processing
+# Global state
 transcription_state = {
     "segments": None,
     "transcript_path": None
 }
 
+
+def get_ollama_models():
+    """Fetch available models from Ollama."""
+    try:
+        import ollama
+        models = ollama.list()
+        model_names = [m['name'].split(':')[0] for m in models.get('models', [])]
+        return model_names if model_names else ["No models found"]
+    except Exception:
+        return ["Ollama not running"]
+
+
+def refresh_models():
+    """Refresh the Ollama model list."""
+    models = get_ollama_models()
+    return gr.update(choices=models, value=models[0] if models else None)
+
+
 def transcribe_video(video_file, whisper_model, device, progress=gr.Progress()):
-    """Transcription only - no AI processing."""
+    """Transcription only."""
     global transcription_state
     
     if video_file is None:
-        return "Please upload a video file.", "", None
+        return "❌ Please upload a video file first.", "", None, ""
     
     video_path = video_file.name if hasattr(video_file, 'name') else video_file
     base_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -38,15 +56,18 @@ def transcribe_video(video_file, whisper_model, device, progress=gr.Progress()):
     
     logs = []
     transcript_text = ""
+    status = ""
     
     try:
-        progress(0.1, desc="Extracting audio...")
-        logs.append("Extracting audio from video...")
-        audio_file = extract_audio(video_path, temp_audio_path)
-        logs.append("Audio extracted successfully.")
+        status = f"🔧 Model: {whisper_model} | Device: {device.upper()}"
         
-        progress(0.3, desc="Transcribing audio...")
-        logs.append(f"Loading Whisper model '{whisper_model}' on {device}...")
+        progress(0.1, desc="Extracting audio...")
+        logs.append("📦 Extracting audio from video...")
+        audio_file = extract_audio(video_path, temp_audio_path)
+        logs.append("✅ Audio extracted.")
+        
+        progress(0.3, desc=f"Loading {whisper_model} model...")
+        logs.append(f"🧠 Loading Whisper '{whisper_model}' on {device}...")
         
         compute_type = "float16" if device == "cuda" else "int8"
         segments = transcribe_audio(
@@ -57,25 +78,24 @@ def transcribe_video(video_file, whisper_model, device, progress=gr.Progress()):
         )
         
         all_segments = list(segments)
-        logs.append(f"Transcription complete. {len(all_segments)} segments found.")
+        logs.append(f"✅ Transcribed {len(all_segments)} segments.")
         
-        progress(0.8, desc="Saving transcript...")
+        progress(0.8, desc="Saving...")
         save_transcript(all_segments, transcript_path, format="markdown")
         
         with open(transcript_path, "r", encoding="utf-8") as f:
             transcript_text = f.read()
         
-        # Store for AI processing
         transcription_state["segments"] = all_segments
         transcription_state["transcript_path"] = transcript_path
         
-        logs.append("Transcript saved successfully!")
-        progress(1.0, desc="Done!")
+        logs.append("✅ Done! You can now generate AI notes.")
+        progress(1.0, desc="Complete!")
+        status = f"✅ Transcribed with {whisper_model} on {device.upper()}"
         
     except Exception as e:
-        logs.append(f"Error: {str(e)}")
-        import traceback
-        logs.append(traceback.format_exc())
+        logs.append(f"❌ Error: {str(e)}")
+        status = "❌ Transcription failed"
     finally:
         if os.path.exists(temp_audio_path):
             cleanup_audio(temp_audio_path)
@@ -83,15 +103,15 @@ def transcribe_video(video_file, whisper_model, device, progress=gr.Progress()):
     log_output = "\n".join(logs)
     transcript_download = transcript_path if os.path.exists(transcript_path) else None
     
-    return log_output, transcript_text, transcript_download
+    return log_output, transcript_text, transcript_download, status
 
 
 def generate_ai_notes(ai_model, progress=gr.Progress()):
-    """Generate AI notes from existing transcription."""
+    """Generate AI notes from transcription."""
     global transcription_state
     
     if transcription_state["segments"] is None:
-        return "Please transcribe a video first.", "", None
+        return "❌ No transcript available. Please transcribe a video first.", "", None, ""
     
     all_segments = transcription_state["segments"]
     transcript_path = transcription_state["transcript_path"]
@@ -102,101 +122,132 @@ def generate_ai_notes(ai_model, progress=gr.Progress()):
     
     logs = []
     notes_text = ""
+    status = f"🤖 Using: {ai_model}"
     
     try:
-        progress(0.1, desc="Checking Ollama...")
-        logs.append(f"Generating AI notes using model '{ai_model}'...")
+        progress(0.1, desc="Connecting to Ollama...")
+        logs.append(f"🤖 Generating notes with '{ai_model}'...")
         
         from src.ai import generate_tutorial_notes, check_ollama_server
         
         if not check_ollama_server():
-            logs.append("Error: Ollama server is not reachable.")
-            logs.append("Make sure you have Ollama installed and run 'ollama serve'.")
-            return "\n".join(logs), "Error: Ollama server not available.", None
+            logs.append("❌ Ollama server not reachable.")
+            logs.append("💡 Run 'ollama serve' in a terminal.")
+            return "\n".join(logs), "", None, "❌ Ollama not running"
         
-        progress(0.3, desc="Generating notes...")
+        progress(0.2, desc=f"Processing with {ai_model}...")
         full_text = "\n".join([f"[{s['start']}-{s['end']}] {s['text']}" for s in all_segments])
         notes_text = generate_tutorial_notes(full_text, model=ai_model)
         
-        progress(0.9, desc="Saving notes...")
+        progress(0.9, desc="Saving...")
         with open(notes_path, "w", encoding="utf-8") as f:
             f.write(notes_text)
         
-        logs.append("AI notes generated successfully!")
-        progress(1.0, desc="Done!")
+        logs.append("✅ AI notes generated!")
+        status = f"✅ Generated with {ai_model}"
+        progress(1.0, desc="Complete!")
         
     except Exception as e:
-        logs.append(f"Error: {str(e)}")
-        import traceback
-        logs.append(traceback.format_exc())
+        logs.append(f"❌ Error: {str(e)}")
+        status = "❌ AI generation failed"
     
     log_output = "\n".join(logs)
     notes_download = notes_path if os.path.exists(notes_path) else None
     
-    return log_output, notes_text, notes_download
+    return log_output, notes_text, notes_download, status
 
+
+# Custom CSS for better styling
+custom_css = """
+.status-box { 
+    padding: 10px; 
+    border-radius: 8px; 
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    border: 1px solid #0f3460;
+    font-weight: bold;
+}
+.step-header {
+    font-size: 1.1em;
+    margin-bottom: 10px;
+    color: #e94560;
+}
+"""
 
 # Build UI
-with gr.Blocks(title="Video to Notes", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="Video to Notes", theme=gr.themes.Soft(primary_hue="purple"), css=custom_css) as demo:
     gr.Markdown("""
     # 🎥 Video to Notes
-    Upload a video to extract a timestamped transcript, then optionally generate AI notes.
+    **Step 1:** Upload video → Transcribe → **Step 2:** Generate AI notes (optional)
     """)
     
     with gr.Row():
+        # LEFT COLUMN - Controls
         with gr.Column(scale=1):
-            gr.Markdown("### Upload & Settings")
+            # Step 1: Transcription
+            gr.Markdown("### 📝 Step 1: Transcribe")
             video_input = gr.File(label="Upload Video", file_types=[".mp4", ".mkv", ".avi", ".mov"])
             
-            whisper_model = gr.Dropdown(
-                choices=["tiny", "base", "small", "medium", "large-v2"],
-                value="small",
-                label="Whisper Model"
-            )
-            device = gr.Radio(
-                choices=["cuda", "cpu"],
-                value="cpu",
-                label="Device"
-            )
+            with gr.Row():
+                whisper_model = gr.Dropdown(
+                    choices=["tiny", "base", "small", "medium", "large-v2"],
+                    value="small",
+                    label="Model",
+                    scale=2
+                )
+                device = gr.Radio(
+                    choices=["cuda", "cpu"],
+                    value="cpu",
+                    label="Device",
+                    scale=1
+                )
             
-            transcribe_btn = gr.Button("1️⃣ Transcribe Video", variant="primary")
+            transcribe_btn = gr.Button("▶️ Transcribe", variant="primary", size="lg")
+            transcribe_status = gr.Textbox(label="Status", interactive=False, elem_classes="status-box")
             
             gr.Markdown("---")
-            gr.Markdown("### AI Options (Requires Ollama)")
-            ai_model = gr.Dropdown(
-                choices=["llama3", "mistral", "gemma2"],
-                value="llama3",
-                label="Ollama Model"
-            )
-            ai_btn = gr.Button("2️⃣ Generate AI Notes", variant="secondary")
+            
+            # Step 2: AI Notes
+            gr.Markdown("### 🤖 Step 2: AI Notes")
+            with gr.Row():
+                ai_model = gr.Dropdown(
+                    choices=get_ollama_models(),
+                    label="Ollama Model",
+                    scale=3
+                )
+                refresh_btn = gr.Button("🔄", scale=1, size="sm")
+            
+            ai_btn = gr.Button("✨ Generate Notes", variant="secondary", size="lg")
+            ai_status = gr.Textbox(label="Status", interactive=False, elem_classes="status-box")
         
+        # RIGHT COLUMN - Output
         with gr.Column(scale=2):
-            gr.Markdown("### Output")
-            log_output = gr.Textbox(label="Logs", lines=6, interactive=False)
+            log_output = gr.Textbox(label="📋 Logs", lines=5, interactive=False)
             
             with gr.Tabs():
-                with gr.TabItem("Transcript"):
-                    transcript_output = gr.Markdown(label="Transcript")
-                    transcript_download = gr.File(label="Download Transcript")
+                with gr.TabItem("📄 Transcript"):
+                    transcript_output = gr.Markdown()
+                    transcript_download = gr.File(label="Download")
                 
-                with gr.TabItem("AI Notes"):
-                    notes_output = gr.Markdown(label="AI Notes")
-                    notes_download = gr.File(label="Download Notes")
+                with gr.TabItem("📝 AI Notes"):
+                    notes_output = gr.Markdown()
+                    notes_download = gr.File(label="Download")
     
     # Event handlers
+    refresh_btn.click(fn=refresh_models, outputs=[ai_model])
+    
     transcribe_btn.click(
         fn=transcribe_video,
         inputs=[video_input, whisper_model, device],
-        outputs=[log_output, transcript_output, transcript_download]
+        outputs=[log_output, transcript_output, transcript_download, transcribe_status]
     )
     
     ai_btn.click(
         fn=generate_ai_notes,
         inputs=[ai_model],
-        outputs=[log_output, notes_output, notes_download]
+        outputs=[log_output, notes_output, notes_download, ai_status]
     )
 
 
 if __name__ == "__main__":
-    demo.queue()  # Enable queue to prevent timeouts
+    demo.queue()
     demo.launch(inbrowser=True)
