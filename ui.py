@@ -27,10 +27,30 @@ def get_ollama_models():
     """Fetch available models from Ollama."""
     try:
         import ollama
-        models = ollama.list()
-        model_names = [m['name'].split(':')[0] for m in models.get('models', [])]
-        return model_names if model_names else ["No models found"]
-    except Exception:
+        response = ollama.list()
+        # Handle different response formats
+        if hasattr(response, 'models'):
+            models = response.models
+        elif isinstance(response, dict) and 'models' in response:
+            models = response['models']
+        else:
+            models = []
+        
+        model_names = []
+        for m in models:
+            if hasattr(m, 'model'):
+                name = m.model.split(':')[0]
+            elif isinstance(m, dict) and 'name' in m:
+                name = m['name'].split(':')[0]
+            elif isinstance(m, dict) and 'model' in m:
+                name = m['model'].split(':')[0]
+            else:
+                continue
+            model_names.append(name)
+        
+        return model_names if model_names else ["No models installed"]
+    except Exception as e:
+        print(f"Error fetching Ollama models: {e}")
         return ["Ollama not running"]
 
 
